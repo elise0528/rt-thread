@@ -1,21 +1,7 @@
 /*
- * File      : pipe.c
- * This file is part of RT-Thread RTOS
- * COPYRIGHT (C) 2012, RT-Thread Development Team
+ * Copyright (c) 2006-2018, RT-Thread Development Team
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Change Logs:
  * Date           Author       Notes
@@ -64,7 +50,7 @@ static rt_size_t rt_pipe_read(rt_device_t dev,
     if (!(pipe->flag & RT_PIPE_FLAG_BLOCK_RD))
     {
         level = rt_hw_interrupt_disable();
-        read_nbytes = rt_ringbuffer_get(&(pipe->ringbuffer), buffer, size);
+        read_nbytes = rt_ringbuffer_get(&(pipe->ringbuffer), (rt_uint8_t *)buffer, size);
 
         /* if the ringbuffer is empty, there won't be any writer waiting */
         if (read_nbytes)
@@ -82,7 +68,7 @@ static rt_size_t rt_pipe_read(rt_device_t dev,
 
     do {
         level = rt_hw_interrupt_disable();
-        read_nbytes = rt_ringbuffer_get(&(pipe->ringbuffer), buffer, size);
+        read_nbytes = rt_ringbuffer_get(&(pipe->ringbuffer), (rt_uint8_t *)buffer, size);
         if (read_nbytes == 0)
         {
             rt_thread_suspend(thread);
@@ -148,10 +134,10 @@ static rt_size_t rt_pipe_write(rt_device_t dev,
 
         if (pipe->flag & RT_PIPE_FLAG_FORCE_WR)
             write_nbytes = rt_ringbuffer_put_force(&(pipe->ringbuffer),
-                                                   buffer, size);
+                                                   (const rt_uint8_t *)buffer, size);
         else
             write_nbytes = rt_ringbuffer_put(&(pipe->ringbuffer),
-                                             buffer, size);
+                                             (const rt_uint8_t *)buffer, size);
 
         _rt_pipe_resume_reader(pipe);
 
@@ -167,7 +153,7 @@ static rt_size_t rt_pipe_write(rt_device_t dev,
 
     do {
         level = rt_hw_interrupt_disable();
-        write_nbytes = rt_ringbuffer_put(&(pipe->ringbuffer), buffer, size);
+        write_nbytes = rt_ringbuffer_put(&(pipe->ringbuffer), (const rt_uint8_t *)buffer, size);
         if (write_nbytes == 0)
         {
             /* pipe full, waiting on suspended write list */
@@ -202,7 +188,7 @@ static rt_err_t rt_pipe_control(rt_device_t dev, int cmd, void *args)
 }
 
 #ifdef RT_USING_DEVICE_OPS
-const static struct rt_device_ops audio_pipe_ops
+const static struct rt_device_ops audio_pipe_ops =
 {
     RT_NULL,
     RT_NULL,
@@ -227,7 +213,7 @@ const static struct rt_device_ops audio_pipe_ops
  */
 rt_err_t rt_audio_pipe_init(struct rt_audio_pipe *pipe,
                       const char *name,
-                      enum rt_audio_pipe_flag flag,
+                      rt_int32_t flag,
                       rt_uint8_t *buf,
                       rt_size_t size)
 {
@@ -272,7 +258,7 @@ rt_err_t rt_audio_pipe_detach(struct rt_audio_pipe *pipe)
 }
 
 #ifdef RT_USING_HEAP
-rt_err_t rt_audio_pipe_create(const char *name, enum rt_audio_pipe_flag flag, rt_size_t size)
+rt_err_t rt_audio_pipe_create(const char *name, rt_int32_t flag, rt_size_t size)
 {
     rt_uint8_t *rb_memptr = RT_NULL;
     struct rt_audio_pipe *pipe = RT_NULL;
@@ -284,7 +270,7 @@ rt_err_t rt_audio_pipe_create(const char *name, enum rt_audio_pipe_flag flag, rt
         return -RT_ENOMEM;
 
     /* create ring buffer of pipe */
-    rb_memptr = rt_malloc(size);
+    rb_memptr = (rt_uint8_t *)rt_malloc(size);
     if (rb_memptr == RT_NULL)
     {
         rt_free(pipe);

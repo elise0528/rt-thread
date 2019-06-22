@@ -1,21 +1,7 @@
 /*
- * File      : pipe.c
- * This file is part of RT-Thread RTOS
- * COPYRIGHT (C) 2012-2017, RT-Thread Development Team
+ * Copyright (c) 2006-2018, RT-Thread Development Team
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Change Logs:
  * Date           Author       Notes
@@ -110,6 +96,12 @@ static int pipe_fops_close(struct dfs_fd *fd)
     device->ref_count --;
 
     rt_mutex_release(&(pipe->lock));
+
+    if (device->ref_count == 0 && pipe->is_named == RT_FALSE)
+    {
+        /* delete the unamed pipe */
+        rt_pipe_delete(device->parent.name);
+    }
 
     return 0;
 }
@@ -433,10 +425,11 @@ rt_pipe_t *rt_pipe_create(const char *name, int bufsz)
     rt_pipe_t *pipe;
     rt_device_t dev;
 
-    pipe = rt_malloc(sizeof(rt_pipe_t));
+    pipe = (rt_pipe_t *)rt_malloc(sizeof(rt_pipe_t));
     if (pipe == RT_NULL) return RT_NULL;
 
     rt_memset(pipe, 0, sizeof(rt_pipe_t));
+    pipe->is_named = RT_TRUE; /* initialize as a named pipe */
     rt_mutex_init(&(pipe->lock), name, RT_IPC_FLAG_FIFO);
     rt_wqueue_init(&(pipe->reader_queue));
     rt_wqueue_init(&(pipe->writer_queue));
@@ -531,6 +524,7 @@ int pipe(int fildes[2])
         return -1;
     }
 
+    pipe->is_named = RT_FALSE; /* unamed pipe */
     rt_snprintf(dev_name, sizeof(dev_name), "/dev/%s", dname);
     fildes[0] = open(dev_name, O_RDONLY, 0);
     if (fildes[0] < 0)
@@ -541,7 +535,7 @@ int pipe(int fildes[2])
     fildes[1] = open(dev_name, O_WRONLY, 0);
     if (fildes[1] < 0)
     {
-        close(fildes[1]);
+        close(fildes[0]);
         return -1;
     }
 

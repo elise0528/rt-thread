@@ -1,21 +1,7 @@
 /*
- * File      : core.c
- * This file is part of RT-Thread RTOS
- * COPYRIGHT (C) 2012, RT-Thread Development Team
+ * Copyright (c) 2006-2018, RT-Thread Development Team
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Change Logs:
  * Date           Author       Notes
@@ -36,7 +22,7 @@ static rt_list_t device_list;
 static rt_size_t rt_usbd_ep_write(udevice_t device, uep_t ep, void *buffer, rt_size_t size);
 static rt_size_t rt_usbd_ep_read_prepare(udevice_t device, uep_t ep, void *buffer, rt_size_t size);
 static rt_err_t rt_usbd_ep_assign(udevice_t device, uep_t ep);
-static rt_err_t rt_usbd_ep_unassign(udevice_t device, uep_t ep);
+rt_err_t rt_usbd_ep_unassign(udevice_t device, uep_t ep);
 
 /**
  * This function will handle get_device_descriptor bRequest.
@@ -208,7 +194,18 @@ static rt_err_t _get_descriptor(struct udevice* device, ureq_t setup)
             _get_string_descriptor(device, setup);
             break;
         case USB_DESC_TYPE_DEVICEQUALIFIER:
-            _get_qualifier_descriptor(device, setup);
+            /* If a full-speed only device (with a device descriptor version number equal to 0200H) receives a
+            GetDescriptor() request for a device_qualifier, it must respond with a request error. The host must not make
+            a request for an other_speed_configuration descriptor unless it first successfully retrieves the
+            device_qualifier descriptor. */
+            if(device->dcd->device_is_hs)
+            {
+                _get_qualifier_descriptor(device, setup);
+            }
+            else
+            {
+                rt_usbd_ep0_set_stall(device);
+            }
             break;
         case USB_DESC_TYPE_OTHERSPEED:
             _get_config_descriptor(device, setup);
@@ -998,7 +995,7 @@ udevice_t rt_usbd_device_new(void)
     RT_DEBUG_LOG(RT_DEBUG_USB, ("rt_usbd_device_new\n"));
 
     /* allocate memory for the object */
-    udevice = rt_malloc(sizeof(struct udevice));
+    udevice = (udevice_t)rt_malloc(sizeof(struct udevice));
     if(udevice == RT_NULL)
     {
         rt_kprintf("alloc memery failed\n");
@@ -1112,7 +1109,7 @@ uconfig_t rt_usbd_config_new(void)
     RT_DEBUG_LOG(RT_DEBUG_USB, ("rt_usbd_config_new\n"));
 
     /* allocate memory for the object */
-    cfg = rt_malloc(sizeof(struct uconfig));
+    cfg = (uconfig_t)rt_malloc(sizeof(struct uconfig));
     if(cfg == RT_NULL)
     {
         rt_kprintf("alloc memery failed\n");
@@ -1865,7 +1862,7 @@ static rt_err_t rt_usbd_ep_assign(udevice_t device, uep_t ep)
     return -RT_ERROR;
 }
 
-static rt_err_t rt_usbd_ep_unassign(udevice_t device, uep_t ep)
+rt_err_t rt_usbd_ep_unassign(udevice_t device, uep_t ep)
 {
     RT_ASSERT(device != RT_NULL);
     RT_ASSERT(device->dcd != RT_NULL);    
@@ -2056,7 +2053,7 @@ rt_size_t rt_usbd_ep0_write(udevice_t device, void *buffer, rt_size_t size)
 
     ep0 = &device->dcd->ep0;
     ep0->request.size = size;
-    ep0->request.buffer = buffer;
+    ep0->request.buffer = (rt_uint8_t *)buffer;
     ep0->request.remain_size = size;
     if(size >= ep0->id->maxpacket)
     {
@@ -2082,7 +2079,7 @@ rt_size_t rt_usbd_ep0_read(udevice_t device, void *buffer, rt_size_t size,
     RT_ASSERT(buffer != RT_NULL);
 
     ep0 = &device->dcd->ep0;
-    ep0->request.buffer = buffer;    
+    ep0->request.buffer = (rt_uint8_t *)buffer;    
     ep0->request.remain_size = size;
     ep0->rx_indicate = rx_ind;
     if(size >= ep0->id->maxpacket)

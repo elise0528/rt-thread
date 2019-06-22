@@ -53,29 +53,30 @@ static void serial_soft_trans_irq(void* parameter);
 BOOL xMBMasterPortSerialInit(UCHAR ucPORT, ULONG ulBaudRate, UCHAR ucDataBits,
         eMBParity eParity)
 {
+    rt_device_t dev = RT_NULL;
+    char uart_name[20];
+
     /**
      * set 485 mode receive and transmit control IO
      * @note MODBUS_MASTER_RT_CONTROL_PIN_INDEX need be defined by user
      */
+#if defined(RT_MODBUS_MASTER_USE_CONTROL_PIN)
     rt_pin_mode(MODBUS_MASTER_RT_CONTROL_PIN_INDEX, PIN_MODE_OUTPUT);
-
+#endif
     /* set serial name */
-    if (ucPORT == 1) {
-#if defined(RT_USING_UART1) || defined(RT_USING_REMAP_UART1)
-        extern struct rt_serial_device serial1;
-        serial = &serial1;
-#endif
-    } else if (ucPORT == 2) {
-#if defined(RT_USING_UART2)
-        extern struct rt_serial_device serial2;
-        serial = &serial2;
-#endif
-    } else if (ucPORT == 3) {
-#if defined(RT_USING_UART3)
-        extern struct rt_serial_device serial3;
-        serial = &serial3;
-#endif
+    rt_snprintf(uart_name,sizeof(uart_name), "uart%d", ucPORT);
+
+    dev = rt_device_find(uart_name);
+    if(dev == RT_NULL)
+    {
+        /* can not find uart */
+        return FALSE;
     }
+    else
+    {
+        serial = (struct rt_serial_device*)dev;
+    }
+
     /* set serial configure parameter */
     serial->config.baud_rate = ulBaudRate;
     serial->config.stop_bits = STOP_BITS_1;
@@ -128,12 +129,16 @@ void vMBMasterPortSerialEnable(BOOL xRxEnable, BOOL xTxEnable)
         /* enable RX interrupt */
         serial->ops->control(serial, RT_DEVICE_CTRL_SET_INT, (void *)RT_DEVICE_FLAG_INT_RX);
         /* switch 485 to receive mode */
+#if defined(RT_MODBUS_MASTER_USE_CONTROL_PIN)
         rt_pin_write(MODBUS_MASTER_RT_CONTROL_PIN_INDEX, PIN_LOW);
+#endif
     }
     else
     {
         /* switch 485 to transmit mode */
+#if defined(RT_MODBUS_MASTER_USE_CONTROL_PIN)
         rt_pin_write(MODBUS_MASTER_RT_CONTROL_PIN_INDEX, PIN_HIGH);
+#endif
         /* disable RX interrupt */
         serial->ops->control(serial, RT_DEVICE_CTRL_CLR_INT, (void *)RT_DEVICE_FLAG_INT_RX);
     }

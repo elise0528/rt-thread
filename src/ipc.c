@@ -1,21 +1,7 @@
 /*
- * File      : ipc.c
- * This file is part of RT-Thread RTOS
- * COPYRIGHT (C) 2006 - 2012, RT-Thread Development Team
+ * Copyright (c) 2006-2018, RT-Thread Development Team
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Change Logs:
  * Date           Author       Notes
@@ -46,6 +32,7 @@
  * 2010-11-10     Bernard      add IPC reset command implementation.
  * 2011-12-18     Bernard      add more parameter checking in message queue
  * 2013-09-14     Grissiom     add an option check in rt_event_recv
+ * 2018-10-02     Bernard      add 64bit support for mailbox
  */
 
 #include <rtthread.h>
@@ -214,6 +201,7 @@ rt_err_t rt_sem_init(rt_sem_t    sem,
                      rt_uint8_t  flag)
 {
     RT_ASSERT(sem != RT_NULL);
+    RT_ASSERT(value < 0x10000U);
 
     /* init object */
     rt_object_init(&(sem->parent.parent), RT_Object_Class_Semaphore, name);
@@ -222,7 +210,7 @@ rt_err_t rt_sem_init(rt_sem_t    sem,
     rt_ipc_object_init(&(sem->parent));
 
     /* set init value */
-    sem->value = value;
+    sem->value = (rt_uint16_t)value;
 
     /* set parent */
     sem->parent.parent.flag = flag;
@@ -274,6 +262,7 @@ rt_sem_t rt_sem_create(const char *name, rt_uint32_t value, rt_uint8_t flag)
     rt_sem_t sem;
 
     RT_DEBUG_NOT_IN_INTERRUPT;
+    RT_ASSERT(value < 0x10000U);
 
     /* allocate object */
     sem = (rt_sem_t)rt_object_allocate(RT_Object_Class_Semaphore, name);
@@ -500,10 +489,10 @@ rt_err_t rt_sem_control(rt_sem_t sem, int cmd, void *arg)
 
     if (cmd == RT_IPC_CMD_RESET)
     {
-        rt_uint32_t value;
+        rt_ubase_t value;
 
         /* get value */
-        value = (rt_uint32_t)arg;
+        value = (rt_ubase_t)arg;
         /* disable interrupt */
         level = rt_hw_interrupt_disable();
 
@@ -764,8 +753,8 @@ __again:
 
                 if (thread->error != RT_EOK)
                 {
-                	/* interrupt by signal, try it again */
-                	if (thread->error == -RT_EINTR) goto __again;
+                    /* interrupt by signal, try it again */
+                    if (thread->error == -RT_EINTR) goto __again;
 
                     /* return error */
                     return thread->error;
@@ -1319,7 +1308,7 @@ rt_err_t rt_mb_init(rt_mailbox_t mb,
     rt_ipc_object_init(&(mb->parent));
 
     /* init mailbox */
-    mb->msg_pool   = msgpool;
+    mb->msg_pool   = (rt_ubase_t *)msgpool;
     mb->size       = size;
     mb->entry      = 0;
     mb->in_offset  = 0;
@@ -1387,7 +1376,7 @@ rt_mailbox_t rt_mb_create(const char *name, rt_size_t size, rt_uint8_t flag)
 
     /* init mailbox */
     mb->size     = size;
-    mb->msg_pool = RT_KERNEL_MALLOC(mb->size * sizeof(rt_uint32_t));
+    mb->msg_pool = (rt_ubase_t *)RT_KERNEL_MALLOC(mb->size * sizeof(rt_ubase_t));
     if (mb->msg_pool == RT_NULL)
     {
         /* delete mailbox object */
@@ -1450,7 +1439,7 @@ RTM_EXPORT(rt_mb_delete);
  * @return the error code
  */
 rt_err_t rt_mb_send_wait(rt_mailbox_t mb,
-                         rt_uint32_t  value,
+                         rt_ubase_t   value,
                          rt_int32_t   timeout)
 {
     struct rt_thread *thread;
@@ -1581,7 +1570,7 @@ RTM_EXPORT(rt_mb_send_wait);
  *
  * @return the error code
  */
-rt_err_t rt_mb_send(rt_mailbox_t mb, rt_uint32_t value)
+rt_err_t rt_mb_send(rt_mailbox_t mb, rt_ubase_t value)
 {
     return rt_mb_send_wait(mb, value, 0);
 }
@@ -1597,7 +1586,7 @@ RTM_EXPORT(rt_mb_send);
  *
  * @return the error code
  */
-rt_err_t rt_mb_recv(rt_mailbox_t mb, rt_uint32_t *value, rt_int32_t timeout)
+rt_err_t rt_mb_recv(rt_mailbox_t mb, rt_ubase_t *value, rt_int32_t timeout)
 {
     struct rt_thread *thread;
     register rt_ubase_t temp;
@@ -1827,7 +1816,7 @@ rt_err_t rt_mq_init(rt_mq_t     mq,
     {
         head = (struct rt_mq_message *)((rt_uint8_t *)mq->msg_pool +
                                         temp * (mq->msg_size + sizeof(struct rt_mq_message)));
-        head->next = mq->msg_queue_free;
+        head->next = (struct rt_mq_message *)mq->msg_queue_free;
         mq->msg_queue_free = head;
     }
 
@@ -1920,7 +1909,7 @@ rt_mq_t rt_mq_create(const char *name,
     {
         head = (struct rt_mq_message *)((rt_uint8_t *)mq->msg_pool +
                                         temp * (mq->msg_size + sizeof(struct rt_mq_message)));
-        head->next = mq->msg_queue_free;
+        head->next = (struct rt_mq_message *)mq->msg_queue_free;
         mq->msg_queue_free = head;
     }
 
@@ -2104,7 +2093,7 @@ rt_err_t rt_mq_urgent(rt_mq_t mq, void *buffer, rt_size_t size)
     temp = rt_hw_interrupt_disable();
 
     /* link msg to the beginning of message queue */
-    msg->next = mq->msg_queue_head;
+    msg->next = (struct rt_mq_message *)mq->msg_queue_head;
     mq->msg_queue_head = msg;
 
     /* if there is no tail */

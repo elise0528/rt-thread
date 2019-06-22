@@ -1,26 +1,7 @@
 /*
- *  shell implementation for finsh shell.
+ * Copyright (c) 2006-2018, RT-Thread Development Team
  *
- * COPYRIGHT (C) 2006 - 2013, RT-Thread Development Team
- *
- *  This file is part of RT-Thread (http://www.rt-thread.org)
- *  Maintainer: bernard.xiong <bernard.xiong at gmail.com>
- *
- *  All rights reserved.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Change Logs:
  * Date           Author       Notes
@@ -39,6 +20,8 @@
 
 #include <rthw.h>
 
+#ifdef RT_USING_FINSH
+
 #include "finsh.h"
 #include "shell.h"
 
@@ -55,7 +38,9 @@
 static struct rt_thread finsh_thread;
 ALIGN(RT_ALIGN_SIZE)
 static char finsh_thread_stack[FINSH_THREAD_STACK_SIZE];
+struct finsh_shell _shell;
 #endif
+
 struct finsh_shell *shell;
 static char *finsh_prompt_custom = RT_NULL;
 
@@ -71,7 +56,7 @@ int finsh_set_prompt(const char * prompt)
     /* strdup */
     if(prompt)
     {
-        finsh_prompt_custom = rt_malloc(strlen(prompt)+1);
+        finsh_prompt_custom = (char *)rt_malloc(strlen(prompt)+1);
         if(finsh_prompt_custom)
         {
             strcpy(finsh_prompt_custom, prompt);
@@ -149,18 +134,18 @@ void finsh_set_prompt_mode(rt_uint32_t prompt_mode)
     shell->prompt_mode = prompt_mode;
 }
 
-static char finsh_getchar(void)
+static int finsh_getchar(void)
 {
 #ifdef RT_USING_POSIX
     return getchar();
 #else
-    char ch;
+    char ch = 0;
 
     RT_ASSERT(shell != RT_NULL);
     while (rt_device_read(shell->device, -1, &ch, 1) != 1)
         rt_sem_take(&shell->rx_sem, RT_WAITING_FOREVER);
 
-    return ch;
+    return (int)ch;
 #endif
 }
 
@@ -294,7 +279,7 @@ const char *finsh_get_password(void)
 
 static void finsh_wait_auth(void)
 {
-    char ch;
+    int ch;
     rt_bool_t input_finish = RT_FALSE;
     char password[FINSH_PASSWORD_MAX] = { 0 };
     rt_size_t cur_pos = 0;
@@ -310,6 +295,10 @@ static void finsh_wait_auth(void)
             {
                 /* read one character from device */
                 ch = finsh_getchar();
+                if (ch < 0)
+                {
+                    continue;
+                }
 
                 if (ch >= ' ' && ch <= '~' && cur_pos < FINSH_PASSWORD_MAX)
                 {
@@ -320,8 +309,8 @@ static void finsh_wait_auth(void)
                 else if (ch == '\b' && cur_pos > 0)
                 {
                     /* backspace */
-                    password[cur_pos] = '\0';
                     cur_pos--;
+                    password[cur_pos] = '\0';
                     rt_kprintf("\b \b");
                 }
                 else if (ch == '\r' || ch == '\n')
@@ -473,12 +462,9 @@ static void shell_push_history(struct finsh_shell *shell)
 }
 #endif
 
-#ifndef RT_USING_HEAP
-struct finsh_shell _shell;
-#endif
 void finsh_thread_entry(void *parameter)
 {
-    char ch;
+    int ch;
 
     /* normal is echo mode */
 #ifndef FINSH_ECHO_DISABLE_DEFAULT
@@ -521,6 +507,10 @@ void finsh_thread_entry(void *parameter)
     while (1)
     {
         ch = finsh_getchar();
+        if (ch < 0)
+        {
+            continue;
+        }
 
         /*
          * handle control key
@@ -792,7 +782,7 @@ int finsh_system_init(void)
     rt_thread_t tid;
 
 #ifdef FINSH_USING_SYMTAB
-#ifdef __CC_ARM                 /* ARM C Compiler */
+#if defined(__CC_ARM) || defined(__CLANG_ARM)          /* ARM C Compiler */
     extern const int FSymTab$$Base;
     extern const int FSymTab$$Limit;
     extern const int VSymTab$$Base;
@@ -867,4 +857,6 @@ int finsh_system_init(void)
     return 0;
 }
 INIT_APP_EXPORT(finsh_system_init);
+
+#endif /* RT_USING_FINSH */
 
