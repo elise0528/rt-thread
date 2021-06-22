@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2019, RT-Thread Development Team
+ * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -171,7 +171,7 @@ rt_err_t rt_hwcrypto_ctx_cpy(struct rt_hwcrypto_ctx *des, const struct rt_hwcryp
  * @return          Hardware crypto device
  *
  */
-struct rt_hwcrypto_device *rt_hwcrypto_dev_dufault(void)
+struct rt_hwcrypto_device *rt_hwcrypto_dev_default(void)
 {
     static struct rt_hwcrypto_device *hwcrypto_dev;
 

@@ -3,6 +3,8 @@ menu "Hardware Drivers Config"
 config SOC_STM32L475VE
     bool
     select SOC_SERIES_STM32L4
+    select RT_USING_COMPONENTS_INIT
+    select RT_USING_USER_MAIN
     default y
 
 menu "Onboard Peripheral Drivers"
@@ -13,11 +15,24 @@ menu "Onboard Peripheral Drivers"
         select BSP_USING_UART1
         default y
 
+    config BSP_USING_KEY
+        bool "Enable onboard keys"
+        select RT_USING_PIN
+        select RT_USING_TIMER_SOFT
+        select PKG_USING_MULTIBUTTON
+        default n
+
     config BSP_USING_QSPI_FLASH
         bool "Enable QSPI FLASH (W25Q128 qspi1)"
         select BSP_USING_QSPI
         select RT_USING_SFUD
         select RT_SFUD_USING_QSPI
+        default n
+    
+    config BSP_USING_SPI_LCD
+        bool "Enable LCD (spi3)"
+        select BSP_USING_SPI
+        select BSP_USING_SPI3
         default n
 
     config BSP_USING_SDCARD
@@ -47,6 +62,82 @@ menu "Onboard Peripheral Drivers"
         select PKG_USING_AHT10_LATEST_VERSION
         default n
 
+    menuconfig BSP_USING_AUDIO
+        bool "Enable Audio Device"
+        select RT_USING_AUDIO
+        select BSP_USING_I2C
+        select BSP_USING_I2C3
+        default n
+
+        if BSP_USING_AUDIO
+            config BSP_USING_AUDIO_PLAY
+            bool "Enable Audio Play"
+            default y
+
+            config BSP_USING_AUDIO_RECORD
+            bool "Enable Audio Record"
+            default n
+        endif
+
+    menuconfig BSP_USING_USB_AUDIO
+        bool "Enable USB Audio"
+        select RT_USB_DEVICE_AUDIO
+        select BSP_USING_USBD
+        select BSP_USBD_EP_ISOC
+        select BSP_USING_AUDIO
+        default n
+
+        if BSP_USING_USB_AUDIO
+            config BSP_USING_USB_AUDIO_SPEAKER
+            bool "Enable USB Audio Spearker"
+            select RT_USB_DEVICE_AUDIO_SPEAKER
+            select BSP_USING_AUDIO_PLAY
+            default y
+
+            config BSP_USING_USB_AUDIO_MIC
+            bool "Enable USB Audio Mic"
+            select RT_USB_DEVICE_AUDIO_MIC
+            select BSP_USING_AUDIO_RECORD
+            default n
+
+            config _BSP_USB_DEVICE_COMPOSITE
+            bool
+            select RT_USB_DEVICE_COMPOSITE
+            default y
+            depends on BSP_USING_USB_AUDIO_SPEAKER && BSP_USING_USB_AUDIO_MIC
+        endif
+
+    config BSP_USING_WIFI
+            bool "Enable WiFi (AP6181)"
+            select PKG_USING_WLAN_WICED
+            select BSP_USING_STM32_SDIO
+            select PKG_USING_STM32_SDIO
+            select BSP_USING_QSPI_FLASH
+            select BSP_USING_ON_CHIP_FLASH
+            select RT_USING_WIFI
+            select RT_WLAN_PROT_LWIP_PBUF_FORCE
+            select RT_USING_LWIP
+            select RT_USING_LIBC
+            select RT_USING_POSIX
+            select RT_USING_DFS
+            select PKG_USING_FAL
+            select PKG_USING_EASYFLASH
+            select RT_USING_WIFI_6181_LIB
+            select RT_USING_OTA_LIB
+            select RT_USING_SAL
+            default n
+
+            if BSP_USING_WIFI
+                config BSP_USING_WIFI_THREAD_INIT
+                    bool "Using Thread Initialize WiFi"
+                    default n
+
+                config BSP_USING_WIFI_AUTO_INIT
+                    bool "Using WiFi Automatically Initialization"
+                    depends on RT_USING_COMPONENTS_INIT
+                    default y
+            endif
+
 endmenu
 
 menu "On-chip Peripheral Drivers"
@@ -61,23 +152,59 @@ menu "On-chip Peripheral Drivers"
         default y
         select RT_USING_SERIAL
         if BSP_USING_UART
-            config BSP_USING_UART1
-                bool "Enable UART1"
+            menuconfig BSP_USING_UART1
+                bool "Enable UART1 (Debugger)"
                 default y
+                if BSP_USING_UART1
+                    config BSP_UART1_RX_USING_DMA
+                        bool "Enable UART1 RX DMA"
+                        depends on BSP_USING_UART1 && RT_SERIAL_USING_DMA
+                        default n
 
-            config BSP_UART1_RX_USING_DMA
-                bool "Enable UART1 RX DMA"
-                depends on BSP_USING_UART1 && RT_SERIAL_USING_DMA
-                default n
+                    config BSP_UART1_TX_USING_DMA
+                        bool "Enable UART1 TX DMA"
+                        depends on BSP_USING_UART1 && RT_SERIAL_USING_DMA
+                        default n
 
-            config BSP_USING_UART2
+                    config BSP_UART1_RX_BUFSIZE
+                        int "Set UART1 RX buffer size"
+                        range 64 65535
+                        depends on RT_USING_SERIAL_V2
+                        default 256
+
+                    config BSP_UART1_TX_BUFSIZE
+                        int "Set UART1 TX buffer size"
+                        range 0 65535
+                        depends on RT_USING_SERIAL_V2
+                        default 0
+                endif
+
+            menuconfig BSP_USING_UART2
                 bool "Enable UART2"
                 default n
+                if BSP_USING_UART2
+                    config BSP_UART2_RX_USING_DMA
+                        bool "Enable UART2 RX DMA"
+                        depends on BSP_USING_UART2 && RT_SERIAL_USING_DMA
+                        default n
 
-            config BSP_UART2_RX_USING_DMA
-                bool "Enable UART2 RX DMA"
-                depends on BSP_USING_UART2 && RT_SERIAL_USING_DMA
-                default n
+                    config BSP_UART2_TX_USING_DMA
+                        bool "Enable UART2 TX DMA"
+                        depends on BSP_USING_UART2 && RT_SERIAL_USING_DMA
+                        default n
+
+                    config BSP_UART2_RX_BUFSIZE
+                        int "Set UART2 RX buffer size"
+                        range 64 65535
+                        depends on RT_USING_SERIAL_V2
+                        default 256
+
+                    config BSP_UART2_TX_BUFSIZE
+                        int "Set UART2 TX buffer size"
+                        range 0 65535
+                        depends on RT_USING_SERIAL_V2
+                        default 256
+                endif
         endif
 
     config BSP_USING_ON_CHIP_FLASH
@@ -117,6 +244,21 @@ menu "On-chip Peripheral Drivers"
                 bool "Enable SPI2 RX DMA"
                 depends on BSP_USING_SPI2
                 select BSP_SPI2_TX_USING_DMA
+                default n
+                
+            config BSP_USING_SPI3
+                bool "Enable SPI3 BUS"
+                default n
+
+            config BSP_SPI3_TX_USING_DMA
+                bool "Enable SPI3 TX DMA"
+                depends on BSP_USING_SPI3
+                default n
+                
+            config BSP_SPI3_RX_USING_DMA
+                bool "Enable SPI3 RX DMA"
+                depends on BSP_USING_SPI3
+                select BSP_SPI3_TX_USING_DMA
                 default n
         endif
 
@@ -199,6 +341,20 @@ menu "On-chip Peripheral Drivers"
                     bool "Enable PWM1 channel1"
                     default n
             endif
+
+        menuconfig BSP_USING_PWM2
+            bool "Enable timer2 output pwm"
+            default n
+            if BSP_USING_PWM2
+                config BSP_USING_PWM2_CH3
+                    bool "Enable PWM2 channel3"
+                    default n
+
+                config BSP_USING_PWM2_CH4
+                    bool "Enable PWM2 channel4"
+                    default n
+            endif
+
         menuconfig BSP_USING_PWM4
             bool "Enable timer4 output pwm"
             default n
@@ -223,10 +379,19 @@ menu "On-chip Peripheral Drivers"
                 default n
         endif
 
+    menuconfig BSP_USING_DAC
+        bool "Enable DAC"
+        default n
+        select RT_USING_DAC
+        if BSP_USING_DAC
+            config BSP_USING_DAC1
+                bool "Enable DAC1"
+                default n
+        endif
+
     menuconfig BSP_USING_ONCHIP_RTC
         bool "Enable RTC"
         select RT_USING_RTC
-        select RT_USING_LIBC
         default n
         if BSP_USING_ONCHIP_RTC
             choice
@@ -246,14 +411,37 @@ menu "On-chip Peripheral Drivers"
         select RT_USING_WDT
         default n
 
-    config BSP_USING_USBD_FS
+    config BSP_USING_USBD
         bool "Enable OTGFS as USB device"
         select RT_USING_USB_DEVICE
         default n
 
+    config BSP_USBD_EP_ISOC
+        bool
+        default n
+        depends on BSP_USING_USBD
+
+    config BSP_USING_STM32_SDIO
+            bool "Enable SDIO"
+            select RT_USING_SDIO
+            select PKG_USING_STM32_SDIO
+            default n
+            help
+            BSP_USING_STM32_SDIO use drv_sdio_adapter.c,and
+            BSP_USING_SDIO use drv_sdio.c
+   
+    source "../libraries/HAL_Drivers/Kconfig"
+    
 endmenu
 
 menu "Board extended module Drivers"
+
+    config BSP_USING_NRF24L01
+        bool "Enable NRF24L01"
+        select BSP_USING_SPI
+        select BSP_USING_SPI2
+        select PKG_USING_NRF24L01
+        default n
 
 endmenu
 

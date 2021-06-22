@@ -28,6 +28,7 @@ import os
 import sys
 import string
 import utils
+import operator
 
 from SCons.Script import *
 from utils import _make_path_relative
@@ -84,7 +85,7 @@ class Win32Spawn:
                 try:
                     os.remove(f)
                 except Exception as e:
-                    print ('Error removing file: ' + e)
+                    print('Error removing file: ' + e)
                     return -1
             return 0
 
@@ -105,8 +106,8 @@ class Win32Spawn:
         try:
             proc = subprocess.Popen(cmdline, env=_e, shell=False)
         except Exception as e:
-            print ('Error in calling command:' + cmdline.split(' ')[0])
-            print ('Exception: ' + os.strerror(e.errno))
+            print('Error in calling command:' + cmdline.split(' ')[0])
+            print('Exception: ' + os.strerror(e.errno))
             if (os.strerror(e.errno) == "No such file or directory"):
                 print ("\nPlease check Toolchains PATH setting.\n")
 
@@ -169,12 +170,12 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
     AddOption('--project-path',
                       dest = 'project-path',
                       type = 'string',
-                      default = False,
+                      default = None,
                       help = 'set dist-ide project output path')
     AddOption('--project-name',
                       dest = 'project-name',
                       type = 'string',
-                      default = False,
+                      default = None,
                       help = 'set project name')
     AddOption('--reset-project-config',
                       dest = 'reset-project-config',
@@ -207,7 +208,12 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
     AddOption('--target',
                       dest = 'target',
                       type = 'string',
-                      help = 'set target project: mdk/mdk4/mdk5/iar/vs/vsc/ua/cdk/ses/makefile/eclipse')
+                      help = 'set target project: mdk/mdk4/mdk5/iar/vs/vsc/ua/cdk/ses/makefile/eclipse/codelite/cmake')
+    AddOption('--stackanalysis',
+                dest = 'stackanalysis',
+                action = 'store_true',
+                default = False,
+                help = 'thread stack static analysis')
     AddOption('--genconfig',
                 dest = 'genconfig',
                 action = 'store_true',
@@ -250,7 +256,9 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
                 'cdk':('gcc', 'gcc'),
                 'makefile':('gcc', 'gcc'),
                 'eclipse':('gcc', 'gcc'),
-                'ses' : ('gcc', 'gcc')}
+                'ses' : ('gcc', 'gcc'),
+                'cmake':('gcc', 'gcc'),
+                'codelite' : ('gcc', 'gcc')}
     tgt_name = GetOption('target')
 
     if tgt_name:
@@ -267,11 +275,8 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
             os.environ['RTT_CC'] = rtconfig.CROSS_TOOL
             utils.ReloadModule(rtconfig)
         except KeyError:
-            print ('Unknow target: '+ tgt_name+'. Avaible targets: ' +', '.join(tgt_dict.keys()))
+            print('Unknow target: '+ tgt_name+'. Avaible targets: ' +', '.join(tgt_dict.keys()))
             sys.exit(1)
-    elif (GetDepend('RT_USING_NEWLIB') == False and GetDepend('RT_USING_NOLIBC') == False) \
-        and rtconfig.PLATFORM == 'gcc':
-        AddDepend('RT_USING_MINILIBC')
 
     # auto change the 'RTT_EXEC_PATH' when 'rtconfig.EXEC_PATH' get failed
     if not os.path.exists(rtconfig.EXEC_PATH):
@@ -281,8 +286,8 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
             utils.ReloadModule(rtconfig)
 
     # add compability with Keil MDK 4.6 which changes the directory of armcc.exe
-    if rtconfig.PLATFORM == 'armcc':
-        if not os.path.isfile(os.path.join(rtconfig.EXEC_PATH, 'armcc.exe')):
+    if rtconfig.PLATFORM == 'armcc' or rtconfig.PLATFORM == 'armclang':
+        if rtconfig.PLATFORM == 'armcc' and not os.path.isfile(os.path.join(rtconfig.EXEC_PATH, 'armcc.exe')):
             if rtconfig.EXEC_PATH.find('bin40') > 0:
                 rtconfig.EXEC_PATH = rtconfig.EXEC_PATH.replace('bin40', 'armcc/bin')
                 Env['LINKFLAGS'] = Env['LINKFLAGS'].replace('RV31', 'armcc')
@@ -314,7 +319,7 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
         os.environ['PATH'] = rtconfig.EXEC_PATH + ":" + os.environ['PATH']
 
     # add program path
-    env.PrependENVPath('PATH', rtconfig.EXEC_PATH)
+    env.PrependENVPath('PATH', os.environ['PATH'])
     # add rtconfig.h/BSP path into Kernel group
     DefineGroup("Kernel", [], [], CPPPATH=[str(Dir('#').abspath)])
 
@@ -362,6 +367,11 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
         genconfig()
         exit(0)
 
+    if GetOption('stackanalysis'):
+        from WCS import ThreadStackStaticAnalysis
+        ThreadStackStaticAnalysis(Env)
+        exit(0)
+    
     if env['PLATFORM'] != 'win32':
         AddOption('--menuconfig',
                     dest = 'menuconfig',
@@ -377,7 +387,7 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
                 dest = 'pyconfig',
                 action = 'store_true',
                 default = False,
-                help = 'make menuconfig for RT-Thread BSP')
+                help = 'Python GUI menuconfig for RT-Thread BSP')
     AddOption('--pyconfig-silent',
                 dest = 'pyconfig_silent',
                 action = 'store_true',
@@ -385,14 +395,14 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
                 help = 'Don`t show pyconfig window')
 
     if GetOption('pyconfig_silent'):    
-        from menuconfig import pyconfig_silent
+        from menuconfig import guiconfig_silent
 
-        pyconfig_silent(Rtt_Root)
+        guiconfig_silent(Rtt_Root)
         exit(0)
     elif GetOption('pyconfig'):
-        from menuconfig import pyconfig
+        from menuconfig import guiconfig
 
-        pyconfig(Rtt_Root)
+        guiconfig(Rtt_Root)
         exit(0)
 
     configfn = GetOption('useconfig')
@@ -437,6 +447,11 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
                            variant_dir=kernel_vdir + '/components',
                            duplicate=0,
                            exports='remove_components'))
+    # include testcases
+    if os.path.isfile(os.path.join(Rtt_Root, 'examples/utest/testcases/SConscript')):
+        objs.extend(SConscript(Rtt_Root + '/examples/utest/testcases/SConscript',
+                           variant_dir=kernel_vdir + '/examples/utest/testcases',
+                           duplicate=0))
 
     return objs
 
@@ -617,6 +632,8 @@ def DefineGroup(name, src, depend, **parameters):
     group['name'] = name
     group['path'] = group_path
     if type(src) == type([]):
+        # remove duplicate elements from list
+        src = list(set(src))
         group['src'] = File(src)
     else:
         group['src'] = src
@@ -651,7 +668,7 @@ def DefineGroup(name, src, depend, **parameters):
     # check whether to clean up library
     if GetOption('cleanlib') and os.path.exists(os.path.join(group['path'], GroupLibFullName(name, Env))):
         if group['src'] != []:
-            print ('Remove library:'+ GroupLibFullName(name, Env))
+            print('Remove library:'+ GroupLibFullName(name, Env))
             fn = os.path.join(group['path'], GroupLibFullName(name, Env))
             if os.path.exists(fn):
                 os.unlink(fn)
@@ -675,8 +692,16 @@ def DefineGroup(name, src, depend, **parameters):
             MergeGroup(g, group)
             return objs
 
+    def PriorityInsertGroup(groups, group):
+        length = len(groups)
+        for i in range(0, length):
+            if operator.gt(groups[i]['name'].lower(), group['name'].lower()):
+                groups.insert(i, group)
+                return
+        groups.append(group)
+
     # add a new group
-    Projects.append(group)
+    PriorityInsertGroup(Projects, group)
 
     return objs
 
@@ -716,7 +741,7 @@ def BuildLibInstallAction(target, source, env):
         if Group['name'] == lib_name:
             lib_name = GroupLibFullName(Group['name'], env)
             dst_name = os.path.join(Group['path'], lib_name)
-            print ('Copy '+lib_name+' => ' +dst_name)
+            print('Copy '+lib_name+' => ' + dst_name)
             do_copy_file(lib_name, dst_name)
             break
 
@@ -853,6 +878,14 @@ def GenTargetProject(program = None):
     if GetOption('target') == 'eclipse':
         from eclipse import TargetEclipse
         TargetEclipse(Env, GetOption('reset-project-config'), GetOption('project-name'))
+        
+    if GetOption('target') == 'codelite':
+        from codelite import TargetCodelite
+        TargetCodelite(Projects, program)
+
+    if GetOption('target') == 'cmake':
+        from cmake import CMakeProject
+        CMakeProject(Env,Projects)
 
 
 def EndBuilding(target, program = None):
@@ -892,14 +925,11 @@ def EndBuilding(target, program = None):
         project_name = GetOption('project-name')
 
         if not isinstance(project_path, str) or len(project_path) == 0 :
-            print("\nwarning : --project-path=your_project_path parameter is required.")
-            print("\nstop!")
-            exit(0)
-
+            project_path = os.path.join(BSP_ROOT, 'dist_ide_project')
+            print("\nwarning : --project-path not specified, use default path: {0}.".format(project_path))
         if not isinstance(project_name, str) or len(project_name) == 0:
-            print("\nwarning : --project-name=your_project_name parameter is required.")
-            print("\nstop!")
-            exit(0)
+            project_name = "dist_ide_project"
+            print("\nwarning : --project-name not specified, use default project name: {0}.".format(project_name))
 
         rtt_ide = {'project_path' : project_path, 'project_name' : project_name}
         MkDist(program, BSP_ROOT, Rtt_Root, Env, rtt_ide)
@@ -973,11 +1003,11 @@ def GetVersion():
     prepcessor.process_contents(contents)
     def_ns = prepcessor.cpp_namespace
 
-    version = int(filter(lambda ch: ch in '0123456789.', def_ns['RT_VERSION']))
-    subversion = int(filter(lambda ch: ch in '0123456789.', def_ns['RT_SUBVERSION']))
+    version = int([ch for ch in def_ns['RT_VERSION'] if ch in '0123456789.'])
+    subversion = int([ch for ch in def_ns['RT_SUBVERSION'] if ch in '0123456789.'])
 
     if 'RT_REVISION' in def_ns:
-        revision = int(filter(lambda ch: ch in '0123456789.', def_ns['RT_REVISION']))
+        revision = int([ch for ch in def_ns['RT_REVISION'] if ch in '0123456789.'])
         return '%d.%d.%d' % (version, subversion, revision)
 
     return '0.%d.%d' % (version, subversion)

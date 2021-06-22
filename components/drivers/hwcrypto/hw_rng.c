@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2019, RT-Thread Development Team
+ * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -81,7 +81,7 @@ rt_err_t rt_hwcrypto_rng_default(struct rt_hwcrypto_device *device)
  * @brief           Getting Random Numbers from RNG Context
  *
  * @param ctx       RNG context
- * 
+ *
  * @return          Random number
  */
 rt_uint32_t rt_hwcrypto_rng_update_ctx(struct rt_hwcrypto_ctx *ctx)
@@ -103,8 +103,8 @@ rt_uint32_t rt_hwcrypto_rng_update(void)
     /* Default device does not exist ? */
     if (ctx_default == RT_NULL)
     {
-        /* try create Context from dufault device */
-        rt_hwcrypto_rng_default(rt_hwcrypto_dev_dufault());
+        /* try create Context from default device */
+        rt_hwcrypto_rng_default(rt_hwcrypto_dev_default());
     }
     return rt_hwcrypto_rng_update_ctx(ctx_default);
 }

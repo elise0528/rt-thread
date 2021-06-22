@@ -6,6 +6,9 @@
 ; Change Logs:
 ; Date           Author       Notes
 ; 2018-09-01     xuzhuoyi     the first version.
+; 2019-06-17     zhaoxiaowei  fix bugs of old c28x interrupt api.
+; 2019-07-03     zhaoxiaowei  add _rt_hw_calc_csb function to support __rt_ffs.
+; 2019-12-05     xiaolifan    add support for hardware fpu32
 ;
 
     .ref   _rt_interrupt_to_thread
@@ -15,12 +18,23 @@
     .def   _RTOSINT_Handler
     .def   _rt_hw_get_st0
     .def   _rt_hw_get_st1
+    .def   _rt_hw_calc_csb
     .def   _rt_hw_context_switch_interrupt
     .def   _rt_hw_context_switch
     .def   _rt_hw_context_switch_to
     .def   _rt_hw_interrupt_thread_switch
     .def   _rt_hw_interrupt_disable
     .def   _rt_hw_interrupt_enable
+    
+;workaround for importing fpu settings from the compiler
+    .cdecls C,NOLIST
+    %{
+        #ifdef __TMS320C28XX_FPU32__
+            #define __FPU32__ 1
+        #else
+            #define __FPU32__ 0
+        #endif
+    %}
 
 
 RT_CTX_SAVE  .macro      
@@ -35,12 +49,37 @@ RT_CTX_SAVE  .macro
     PUSH    XAR7
     PUSH    XT
     PUSH    RPC
-
+    
+    .if __FPU32__
+    PUSH	RB
+    MOV32	*SP++, STF
+    MOV32	*SP++, R0H
+    MOV32	*SP++, R1H
+    MOV32	*SP++, R2H
+    MOV32	*SP++, R3H
+    MOV32	*SP++, R4H
+    MOV32	*SP++, R5H
+    MOV32	*SP++, R6H
+    MOV32	*SP++, R7H
+    .endif
  
     .endm
 
 
 RT_CTX_RESTORE  .macro
+
+    .if __FPU32__
+    MOV32	R7H, *--SP, UNCF
+    MOV32	R6H, *--SP, UNCF
+    MOV32	R5H, *--SP, UNCF
+    MOV32	R4H, *--SP, UNCF
+    MOV32	R3H, *--SP, UNCF
+    MOV32	R2H, *--SP, UNCF
+    MOV32	R1H, *--SP, UNCF
+    MOV32	R0H, *--SP, UNCF
+    MOV32	STF, *--SP
+    POP		RB
+    .endif
                                   
     POP     RPC
     POP     XT
@@ -227,6 +266,25 @@ _rt_hw_get_st1:
     PUSH    ST1
     POP     AL
     LRETR
+    .endasmfunc
+
+; C28x do not have a build-in "__ffs" func in its C compiler.
+; We can use the "Count Sign Bits" (CSB) instruction to make one.
+; CSB will return the number of 0's minus 1 above the highest set bit.
+; The count is placed in T. For example:
+;    ACC        T     maxbit
+; 0x00000001    30      0
+; 0x00000010    26      4
+; 0x000001FF    22      8
+; 0x000001F0    22      8
+    .asmfunc
+_rt_hw_calc_csb:
+    MOV     AH, #0
+    CSB     ACC                   ; T = no. of sign bits - 1
+    MOVU    ACC, T                ; ACC = no. of sign bits - 1
+    SUBB    ACC, #30              ; ACC = ACC - 30
+    ABS     ACC                   ; ACC = |ACC|
+    lretr
     .endasmfunc
 
 ;

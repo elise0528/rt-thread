@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2019, RT-Thread Development Team
+ * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -26,6 +26,13 @@ extern "C" {
 #ifndef NETDEV_DNS_SERVERS_NUM
 #define NETDEV_DNS_SERVERS_NUM         2U
 #endif
+
+#if NETDEV_IPV6
+/* the maximum of dns server number supported */
+#ifndef NETDEV_IPV6_NUM_ADDRESSES
+#define NETDEV_IPV6_NUM_ADDRESSES      3U
+#endif
+#endif /* NETDEV_IPV6 */
 
 /* whether the network interface device is 'up' (set by the network interface driver or application) */
 #define NETDEV_FLAG_UP                 0x01U
@@ -72,20 +79,23 @@ struct netdev_ops;
 /* network interface device object */
 struct netdev
 {
-    rt_slist_t list; 
-    
+    rt_slist_t list;
+
     char name[RT_NAME_MAX];                            /* network interface device name */
     ip_addr_t ip_addr;                                 /* IP address */
     ip_addr_t netmask;                                 /* subnet mask */
     ip_addr_t gw;                                      /* gateway */
+#if NETDEV_IPV6
+    ip_addr_t ip6_addr[NETDEV_IPV6_NUM_ADDRESSES];     /* array of IPv6 addresses */
+#endif /* NETDEV_IPV6 */
     ip_addr_t dns_servers[NETDEV_DNS_SERVERS_NUM];     /* DNS server */
     uint8_t hwaddr_len;                                /* hardware address length */
     uint8_t hwaddr[NETDEV_HWADDR_MAX_LEN];             /* hardware address */
-    
+
     uint16_t flags;                                    /* network interface device status flag */
     uint16_t mtu;                                      /* maximum transfer unit (in bytes) */
     const struct netdev_ops *ops;                      /* network interface device operations */
-    
+
     netdev_callback_fn status_callback;                /* network interface device flags change callback */
     netdev_callback_fn addr_callback;                  /* network interface device address information change callback */
 
@@ -122,10 +132,14 @@ struct netdev_ops
     int (*set_dns_server)(struct netdev *netdev, uint8_t dns_num, ip_addr_t *dns_server);
     int (*set_dhcp)(struct netdev *netdev, rt_bool_t is_enabled);
 
+#ifdef RT_USING_FINSH
     /* set network interface device common network interface device operations */
     int (*ping)(struct netdev *netdev, const char *host, size_t data_len, uint32_t timeout, struct netdev_ping_resp *ping_resp);
     void (*netstat)(struct netdev *netdev);
+#endif
 
+    /* set default network interface device in current network stack*/
+    int (*set_default)(struct netdev *netdev);
 };
 
 /* The network interface device registered and unregistered*/
@@ -163,6 +177,7 @@ int netdev_set_dns_server(struct netdev *netdev, uint8_t dns_num, const ip_addr_
 
 /* Set network interface device callback, it can be called when the status or address changed */
 void netdev_set_status_callback(struct netdev *netdev, netdev_callback_fn status_callback);
+void netdev_set_addr_callback(struct netdev *netdev, netdev_callback_fn addr_callback);
 
 /* Set network interface device status and address, this function can only be called in the network interface device driver */
 void netdev_low_level_set_ipaddr(struct netdev *netdev, const ip_addr_t *ipaddr);
@@ -171,6 +186,7 @@ void netdev_low_level_set_gw(struct netdev *netdev, const ip_addr_t *gw);
 void netdev_low_level_set_dns_server(struct netdev *netdev, uint8_t dns_num, const ip_addr_t *dns_server);
 void netdev_low_level_set_status(struct netdev *netdev, rt_bool_t is_up);
 void netdev_low_level_set_link_status(struct netdev *netdev, rt_bool_t is_up);
+void netdev_low_level_set_internet_status(struct netdev *netdev, rt_bool_t is_up);
 void netdev_low_level_set_dhcp_status(struct netdev *netdev, rt_bool_t is_enable);
 
 #ifdef __cplusplus

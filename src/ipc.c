@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2018, RT-Thread Development Team
+ * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -33,6 +33,12 @@
  * 2011-12-18     Bernard      add more parameter checking in message queue
  * 2013-09-14     Grissiom     add an option check in rt_event_recv
  * 2018-10-02     Bernard      add 64bit support for mailbox
+ * 2019-09-16     tyx          add send wait support for message queue
+ * 2020-07-29     Meco Man     fix thread->event_set/event_info when received an
+ *                             event without pending
+ * 2020-10-11     Meco Man     add value overflow-check code
+ * 2021-01-03     Meco Man     implement rt_mb_urgent()
+ * 2021-05-30     Meco Man     implement rt_mutex_trytake()
  */
 
 #include <rtthread.h>
@@ -42,7 +48,7 @@
 extern void (*rt_object_trytake_hook)(struct rt_object *object);
 extern void (*rt_object_take_hook)(struct rt_object *object);
 extern void (*rt_object_put_hook)(struct rt_object *object);
-#endif
+#endif /* RT_USING_HOOK */
 
 /**
  * @addtogroup IPC
@@ -59,7 +65,7 @@ extern void (*rt_object_put_hook)(struct rt_object *object);
  */
 rt_inline rt_err_t rt_ipc_object_init(struct rt_ipc_object *ipc)
 {
-    /* init ipc object */
+    /* initialize ipc object */
     rt_list_init(&(ipc->suspend_thread));
 
     return RT_EOK;
@@ -87,7 +93,7 @@ rt_inline rt_err_t rt_ipc_list_suspend(rt_list_t        *list,
     {
     case RT_IPC_FLAG_FIFO:
         rt_list_insert_before(list, &(thread->tlist));
-        break;
+        break; /* RT_IPC_FLAG_FIFO */
 
     case RT_IPC_FLAG_PRIO:
         {
@@ -115,6 +121,10 @@ rt_inline rt_err_t rt_ipc_list_suspend(rt_list_t        *list,
             if (n == list)
                 rt_list_insert_before(list, &(thread->tlist));
         }
+        break;/* RT_IPC_FLAG_PRIO */
+
+    default:
+        RT_ASSERT(0);
         break;
     }
 
@@ -158,13 +168,13 @@ rt_inline rt_err_t rt_ipc_list_resume_all(rt_list_t *list)
     struct rt_thread *thread;
     register rt_ubase_t temp;
 
-    /* wakeup all suspend threads */
+    /* wakeup all suspended threads */
     while (!rt_list_isempty(list))
     {
         /* disable interrupt */
         temp = rt_hw_interrupt_disable();
 
-        /* get next suspend thread */
+        /* get next suspended thread */
         thread = rt_list_entry(list->next, struct rt_thread, tlist);
         /* set error code to RT_ERROR */
         thread->error = -RT_ERROR;
@@ -172,7 +182,7 @@ rt_inline rt_err_t rt_ipc_list_resume_all(rt_list_t *list)
         /*
          * resume thread
          * In rt_thread_resume function, it will remove current thread from
-         * suspend list
+         * suspended list
          */
         rt_thread_resume(thread);
 
@@ -190,7 +200,7 @@ rt_inline rt_err_t rt_ipc_list_resume_all(rt_list_t *list)
  *
  * @param sem the semaphore object
  * @param name the name of semaphore
- * @param value the init value of semaphore
+ * @param value the initial value of semaphore
  * @param flag the flag of semaphore
  *
  * @return the operation status, RT_EOK on successful
@@ -203,13 +213,13 @@ rt_err_t rt_sem_init(rt_sem_t    sem,
     RT_ASSERT(sem != RT_NULL);
     RT_ASSERT(value < 0x10000U);
 
-    /* init object */
+    /* initialize object */
     rt_object_init(&(sem->parent.parent), RT_Object_Class_Semaphore, name);
 
-    /* init ipc object */
+    /* initialize ipc object */
     rt_ipc_object_init(&(sem->parent));
 
-    /* set init value */
+    /* set initial value */
     sem->value = (rt_uint16_t)value;
 
     /* set parent */
@@ -235,7 +245,7 @@ rt_err_t rt_sem_detach(rt_sem_t sem)
     RT_ASSERT(rt_object_get_type(&sem->parent.parent) == RT_Object_Class_Semaphore);
     RT_ASSERT(rt_object_is_systemobject(&sem->parent.parent));
 
-    /* wakeup all suspend threads */
+    /* wakeup all suspended threads */
     rt_ipc_list_resume_all(&(sem->parent.suspend_thread));
 
     /* detach semaphore object */
@@ -250,7 +260,7 @@ RTM_EXPORT(rt_sem_detach);
  * This function will create a semaphore from system resource
  *
  * @param name the name of semaphore
- * @param value the init value of semaphore
+ * @param value the initial value of semaphore
  * @param flag the flag of semaphore
  *
  * @return the created semaphore, RT_NULL on error happen
@@ -269,10 +279,10 @@ rt_sem_t rt_sem_create(const char *name, rt_uint32_t value, rt_uint8_t flag)
     if (sem == RT_NULL)
         return sem;
 
-    /* init ipc object */
+    /* initialize ipc object */
     rt_ipc_object_init(&(sem->parent));
 
-    /* set init value */
+    /* set initial value */
     sem->value = value;
 
     /* set parent */
@@ -300,7 +310,7 @@ rt_err_t rt_sem_delete(rt_sem_t sem)
     RT_ASSERT(rt_object_get_type(&sem->parent.parent) == RT_Object_Class_Semaphore);
     RT_ASSERT(rt_object_is_systemobject(&sem->parent.parent) == RT_FALSE);
 
-    /* wakeup all suspend threads */
+    /* wakeup all suspended threads */
     rt_ipc_list_resume_all(&(sem->parent.suspend_thread));
 
     /* delete semaphore object */
@@ -309,7 +319,7 @@ rt_err_t rt_sem_delete(rt_sem_t sem)
     return RT_EOK;
 }
 RTM_EXPORT(rt_sem_delete);
-#endif
+#endif /* RT_USING_HEAP */
 
 /**
  * This function will take a semaphore, if the semaphore is unavailable, the
@@ -417,7 +427,7 @@ RTM_EXPORT(rt_sem_take);
  */
 rt_err_t rt_sem_trytake(rt_sem_t sem)
 {
-    return rt_sem_take(sem, 0);
+    return rt_sem_take(sem, RT_WAITING_NO);
 }
 RTM_EXPORT(rt_sem_trytake);
 
@@ -457,7 +467,17 @@ rt_err_t rt_sem_release(rt_sem_t sem)
         need_schedule = RT_TRUE;
     }
     else
-        sem->value ++; /* increase value */
+    {
+        if(sem->value < RT_SEM_VALUE_MAX)
+        {
+            sem->value ++; /* increase value */
+        }
+        else
+        {
+            rt_hw_interrupt_enable(temp); /* enable interrupt */
+            return -RT_EFULL; /* value overflowed */
+        }
+    }
 
     /* enable interrupt */
     rt_hw_interrupt_enable(temp);
@@ -513,7 +533,7 @@ rt_err_t rt_sem_control(rt_sem_t sem, int cmd, void *arg)
     return -RT_ERROR;
 }
 RTM_EXPORT(rt_sem_control);
-#endif /* end of RT_USING_SEMAPHORE */
+#endif /* RT_USING_SEMAPHORE */
 
 #ifdef RT_USING_MUTEX
 /**
@@ -531,10 +551,10 @@ rt_err_t rt_mutex_init(rt_mutex_t mutex, const char *name, rt_uint8_t flag)
     /* parameter check */
     RT_ASSERT(mutex != RT_NULL);
 
-    /* init object */
+    /* initialize object */
     rt_object_init(&(mutex->parent.parent), RT_Object_Class_Mutex, name);
 
-    /* init ipc object */
+    /* initialize ipc object */
     rt_ipc_object_init(&(mutex->parent));
 
     mutex->value = 1;
@@ -565,7 +585,7 @@ rt_err_t rt_mutex_detach(rt_mutex_t mutex)
     RT_ASSERT(rt_object_get_type(&mutex->parent.parent) == RT_Object_Class_Mutex);
     RT_ASSERT(rt_object_is_systemobject(&mutex->parent.parent));
 
-    /* wakeup all suspend threads */
+    /* wakeup all suspended threads */
     rt_ipc_list_resume_all(&(mutex->parent.suspend_thread));
 
     /* detach semaphore object */
@@ -597,7 +617,7 @@ rt_mutex_t rt_mutex_create(const char *name, rt_uint8_t flag)
     if (mutex == RT_NULL)
         return mutex;
 
-    /* init ipc object */
+    /* initialize ipc object */
     rt_ipc_object_init(&(mutex->parent));
 
     mutex->value              = 1;
@@ -630,16 +650,16 @@ rt_err_t rt_mutex_delete(rt_mutex_t mutex)
     RT_ASSERT(rt_object_get_type(&mutex->parent.parent) == RT_Object_Class_Mutex);
     RT_ASSERT(rt_object_is_systemobject(&mutex->parent.parent) == RT_FALSE);
 
-    /* wakeup all suspend threads */
+    /* wakeup all suspended threads */
     rt_ipc_list_resume_all(&(mutex->parent.suspend_thread));
 
-    /* delete semaphore object */
+    /* delete mutex object */
     rt_object_delete(&(mutex->parent.parent));
 
     return RT_EOK;
 }
 RTM_EXPORT(rt_mutex_delete);
-#endif
+#endif /* RT_USING_HEAP */
 
 /**
  * This function will take a mutex, if the mutex is unavailable, the
@@ -679,12 +699,22 @@ rt_err_t rt_mutex_take(rt_mutex_t mutex, rt_int32_t time)
 
     if (mutex->owner == thread)
     {
-        /* it's the same thread */
-        mutex->hold ++;
+        if(mutex->hold < RT_MUTEX_HOLD_MAX)
+        {
+            /* it's the same thread */
+            mutex->hold ++;
+        }
+        else
+        {
+            rt_hw_interrupt_enable(temp); /* enable interrupt */
+            return -RT_EFULL; /* value overflowed */
+        }
     }
     else
     {
+#ifdef RT_USING_SIGNALS
 __again:
+#endif /* RT_USING_SIGNALS */
         /* The value of mutex is 1 in initial status. Therefore, if the
          * value is great than 0, it indicates the mutex is avaible.
          */
@@ -696,7 +726,15 @@ __again:
             /* set mutex owner and original priority */
             mutex->owner             = thread;
             mutex->original_priority = thread->current_priority;
-            mutex->hold ++;
+            if(mutex->hold < RT_MUTEX_HOLD_MAX)
+            {
+                mutex->hold ++;
+            }
+            else
+            {
+                rt_hw_interrupt_enable(temp); /* enable interrupt */
+                return -RT_EFULL; /* value overflowed */
+            }
         }
         else
         {
@@ -753,8 +791,10 @@ __again:
 
                 if (thread->error != RT_EOK)
                 {
+#ifdef RT_USING_SIGNALS
                     /* interrupt by signal, try it again */
                     if (thread->error == -RT_EINTR) goto __again;
+#endif /* RT_USING_SIGNALS */
 
                     /* return error */
                     return thread->error;
@@ -777,6 +817,19 @@ __again:
     return RT_EOK;
 }
 RTM_EXPORT(rt_mutex_take);
+
+/**
+ * This function will try to take a mutex and immediately return
+ *
+ * @param mutex the mutex object
+ *
+ * @return the error code
+ */
+rt_err_t rt_mutex_trytake(rt_mutex_t mutex)
+{
+    return rt_mutex_take(mutex, RT_WAITING_NO);
+}
+RTM_EXPORT(rt_mutex_trytake);
 
 /**
  * This function will release a mutex, if there are threads suspended on mutex,
@@ -851,7 +904,16 @@ rt_err_t rt_mutex_release(rt_mutex_t mutex)
             /* set new owner and priority */
             mutex->owner             = thread;
             mutex->original_priority = thread->current_priority;
-            mutex->hold ++;
+
+            if(mutex->hold < RT_MUTEX_HOLD_MAX)
+            {
+                mutex->hold ++;
+            }
+            else
+            {
+                rt_hw_interrupt_enable(temp); /* enable interrupt */
+                return -RT_EFULL; /* value overflowed */
+            }
 
             /* resume thread */
             rt_ipc_list_resume(&(mutex->parent.suspend_thread));
@@ -860,8 +922,16 @@ rt_err_t rt_mutex_release(rt_mutex_t mutex)
         }
         else
         {
-            /* increase value */
-            mutex->value ++;
+            if(mutex->value < RT_MUTEX_VALUE_MAX)
+            {
+                /* increase value */
+                mutex->value ++;
+            }
+            else
+            {
+                rt_hw_interrupt_enable(temp); /* enable interrupt */
+                return -RT_EFULL; /* value overflowed */
+            }
 
             /* clear owner */
             mutex->owner             = RT_NULL;
@@ -898,7 +968,7 @@ rt_err_t rt_mutex_control(rt_mutex_t mutex, int cmd, void *arg)
     return -RT_ERROR;
 }
 RTM_EXPORT(rt_mutex_control);
-#endif /* end of RT_USING_MUTEX */
+#endif /* RT_USING_MUTEX */
 
 #ifdef RT_USING_EVENT
 /**
@@ -916,16 +986,16 @@ rt_err_t rt_event_init(rt_event_t event, const char *name, rt_uint8_t flag)
     /* parameter check */
     RT_ASSERT(event != RT_NULL);
 
-    /* init object */
+    /* initialize object */
     rt_object_init(&(event->parent.parent), RT_Object_Class_Event, name);
 
     /* set parent flag */
     event->parent.parent.flag = flag;
 
-    /* init ipc object */
+    /* initialize ipc object */
     rt_ipc_object_init(&(event->parent));
 
-    /* init event */
+    /* initialize event */
     event->set = 0;
 
     return RT_EOK;
@@ -979,10 +1049,10 @@ rt_event_t rt_event_create(const char *name, rt_uint8_t flag)
     /* set parent */
     event->parent.parent.flag = flag;
 
-    /* init ipc object */
+    /* initialize ipc object */
     rt_ipc_object_init(&(event->parent));
 
-    /* init event */
+    /* initialize event */
     event->set = 0;
 
     return event;
@@ -1014,7 +1084,7 @@ rt_err_t rt_event_delete(rt_event_t event)
     return RT_EOK;
 }
 RTM_EXPORT(rt_event_delete);
-#endif
+#endif /* RT_USING_HEAP */
 
 /**
  * This function will send an event to the event object, if there are threads
@@ -1049,7 +1119,7 @@ rt_err_t rt_event_send(rt_event_t event, rt_uint32_t set)
     event->set |= set;
 
     RT_OBJECT_HOOK_CALL(rt_object_put_hook, (&(event->parent.parent)));
-    
+
     if (!rt_list_isempty(&event->parent.suspend_thread))
     {
         /* search thread list to resume thread */
@@ -1072,12 +1142,19 @@ rt_err_t rt_event_send(rt_event_t event, rt_uint32_t set)
             {
                 if (thread->event_set & event->set)
                 {
-                    /* save recieved event set */
+                    /* save the received event set */
                     thread->event_set = thread->event_set & event->set;
 
                     /* received an OR event */
                     status = RT_EOK;
                 }
+            }
+            else
+            {
+                /* enable interrupt */
+                rt_hw_interrupt_enable(level);
+
+                return -RT_EINVAL;
             }
 
             /* move node to the next */
@@ -1142,7 +1219,7 @@ rt_err_t rt_event_recv(rt_event_t   event,
     if (set == 0)
         return -RT_ERROR;
 
-    /* init status */
+    /* initialize status */
     status = -RT_ERROR;
     /* get current thread */
     thread = rt_thread_self();
@@ -1177,6 +1254,10 @@ rt_err_t rt_event_recv(rt_event_t   event,
         if (recved)
             *recved = (event->set & set);
 
+        /* fill thread event info */
+        thread->event_set = (event->set & set);
+        thread->event_info = option;
+
         /* received event */
         if (option & RT_EVENT_FLAG_CLEAR)
             event->set &= ~set;
@@ -1185,6 +1266,11 @@ rt_err_t rt_event_recv(rt_event_t   event,
     {
         /* no waiting */
         thread->error = -RT_ETIMEOUT;
+
+        /* enable interrupt */
+        rt_hw_interrupt_enable(level);
+
+        return -RT_ETIMEOUT;
     }
     else
     {
@@ -1252,7 +1338,7 @@ rt_err_t rt_event_control(rt_event_t event, int cmd, void *arg)
     /* parameter check */
     RT_ASSERT(event != RT_NULL);
     RT_ASSERT(rt_object_get_type(&event->parent.parent) == RT_Object_Class_Event);
-    
+
     if (cmd == RT_IPC_CMD_RESET)
     {
         /* disable interrupt */
@@ -1261,7 +1347,7 @@ rt_err_t rt_event_control(rt_event_t event, int cmd, void *arg)
         /* resume all waiting thread */
         rt_ipc_list_resume_all(&event->parent.suspend_thread);
 
-        /* init event set */
+        /* initialize event set */
         event->set = 0;
 
         /* enable interrupt */
@@ -1275,7 +1361,7 @@ rt_err_t rt_event_control(rt_event_t event, int cmd, void *arg)
     return -RT_ERROR;
 }
 RTM_EXPORT(rt_event_control);
-#endif /* end of RT_USING_EVENT */
+#endif /* RT_USING_EVENT */
 
 #ifdef RT_USING_MAILBOX
 /**
@@ -1298,23 +1384,23 @@ rt_err_t rt_mb_init(rt_mailbox_t mb,
 {
     RT_ASSERT(mb != RT_NULL);
 
-    /* init object */
+    /* initialize object */
     rt_object_init(&(mb->parent.parent), RT_Object_Class_MailBox, name);
 
     /* set parent flag */
     mb->parent.parent.flag = flag;
 
-    /* init ipc object */
+    /* initialize ipc object */
     rt_ipc_object_init(&(mb->parent));
 
-    /* init mailbox */
+    /* initialize mailbox */
     mb->msg_pool   = (rt_ubase_t *)msgpool;
     mb->size       = size;
     mb->entry      = 0;
     mb->in_offset  = 0;
     mb->out_offset = 0;
 
-    /* init an additional list of sender suspend thread */
+    /* initialize an additional list of sender suspend thread */
     rt_list_init(&(mb->suspend_sender_thread));
 
     return RT_EOK;
@@ -1371,10 +1457,10 @@ rt_mailbox_t rt_mb_create(const char *name, rt_size_t size, rt_uint8_t flag)
     /* set parent */
     mb->parent.parent.flag = flag;
 
-    /* init ipc object */
+    /* initialize ipc object */
     rt_ipc_object_init(&(mb->parent));
 
-    /* init mailbox */
+    /* initialize mailbox */
     mb->size     = size;
     mb->msg_pool = (rt_ubase_t *)RT_KERNEL_MALLOC(mb->size * sizeof(rt_ubase_t));
     if (mb->msg_pool == RT_NULL)
@@ -1388,7 +1474,7 @@ rt_mailbox_t rt_mb_create(const char *name, rt_size_t size, rt_uint8_t flag)
     mb->in_offset  = 0;
     mb->out_offset = 0;
 
-    /* init an additional list of sender suspend thread */
+    /* initialize an additional list of sender suspend thread */
     rt_list_init(&(mb->suspend_sender_thread));
 
     return mb;
@@ -1426,7 +1512,7 @@ rt_err_t rt_mb_delete(rt_mailbox_t mb)
     return RT_EOK;
 }
 RTM_EXPORT(rt_mb_delete);
-#endif
+#endif /* RT_USING_HEAP */
 
 /**
  * This function will send a mail to mailbox object. If the mailbox is full,
@@ -1464,7 +1550,6 @@ rt_err_t rt_mb_send_wait(rt_mailbox_t mb,
     if (mb->entry == mb->size && timeout == 0)
     {
         rt_hw_interrupt_enable(temp);
-
         return -RT_EFULL;
     }
 
@@ -1537,8 +1622,17 @@ rt_err_t rt_mb_send_wait(rt_mailbox_t mb,
     ++ mb->in_offset;
     if (mb->in_offset >= mb->size)
         mb->in_offset = 0;
-    /* increase message entry */
-    mb->entry ++;
+
+    if(mb->entry < RT_MB_ENTRY_MAX)
+    {
+        /* increase message entry */
+        mb->entry ++;
+    }
+    else
+    {
+        rt_hw_interrupt_enable(temp); /* enable interrupt */
+        return -RT_EFULL; /* value overflowed */
+    }
 
     /* resume suspended thread */
     if (!rt_list_isempty(&mb->parent.suspend_thread))
@@ -1575,6 +1669,71 @@ rt_err_t rt_mb_send(rt_mailbox_t mb, rt_ubase_t value)
     return rt_mb_send_wait(mb, value, 0);
 }
 RTM_EXPORT(rt_mb_send);
+
+/**
+ * This function will send an urgent mail to mailbox object, if there are threads
+ * suspended on mailbox object, it will be waked up. This function will return
+ * immediately.
+ *
+ * @param mb the mailbox object
+ * @param value the mail
+ *
+ * @return the error code
+ */
+rt_err_t rt_mb_urgent(rt_mailbox_t mb, rt_ubase_t value)
+{
+    register rt_ubase_t temp;
+
+    /* parameter check */
+    RT_ASSERT(mb != RT_NULL);
+    RT_ASSERT(rt_object_get_type(&mb->parent.parent) == RT_Object_Class_MailBox);
+
+    RT_OBJECT_HOOK_CALL(rt_object_put_hook, (&(mb->parent.parent)));
+
+    /* disable interrupt */
+    temp = rt_hw_interrupt_disable();
+
+    if (mb->entry == mb->size)
+    {
+        rt_hw_interrupt_enable(temp);
+        return -RT_EFULL;
+    }
+
+    /* rewind to the previous position */
+    if (mb->out_offset > 0)
+    {
+        mb->out_offset --;
+    }
+    else
+    {
+        mb->out_offset = mb->size - 1;
+    }
+
+    /* set ptr */
+    mb->msg_pool[mb->out_offset] = value;
+
+    /* increase message entry */
+    mb->entry ++;
+
+    /* resume suspended thread */
+    if (!rt_list_isempty(&mb->parent.suspend_thread))
+    {
+        rt_ipc_list_resume(&(mb->parent.suspend_thread));
+
+        /* enable interrupt */
+        rt_hw_interrupt_enable(temp);
+
+        rt_schedule();
+
+        return RT_EOK;
+    }
+
+    /* enable interrupt */
+    rt_hw_interrupt_enable(temp);
+
+    return RT_EOK;
+}
+RTM_EXPORT(rt_mb_urgent);
 
 /**
  * This function will receive a mail from mailbox object, if there is no mail
@@ -1686,8 +1845,12 @@ rt_err_t rt_mb_recv(rt_mailbox_t mb, rt_ubase_t *value, rt_int32_t timeout)
     ++ mb->out_offset;
     if (mb->out_offset >= mb->size)
         mb->out_offset = 0;
+
     /* decrease message entry */
-    mb->entry --;
+    if(mb->entry > 0)
+    {
+        mb->entry --;
+    }
 
     /* resume suspended thread */
     if (!rt_list_isempty(&(mb->suspend_sender_thread)))
@@ -1756,7 +1919,7 @@ rt_err_t rt_mb_control(rt_mailbox_t mb, int cmd, void *arg)
     return -RT_ERROR;
 }
 RTM_EXPORT(rt_mb_control);
-#endif /* end of RT_USING_MAILBOX */
+#endif /* RT_USING_MAILBOX */
 
 #ifdef RT_USING_MESSAGEQUEUE
 struct rt_mq_message
@@ -1790,27 +1953,27 @@ rt_err_t rt_mq_init(rt_mq_t     mq,
     /* parameter check */
     RT_ASSERT(mq != RT_NULL);
 
-    /* init object */
+    /* initialize object */
     rt_object_init(&(mq->parent.parent), RT_Object_Class_MessageQueue, name);
 
     /* set parent flag */
     mq->parent.parent.flag = flag;
 
-    /* init ipc object */
+    /* initialize ipc object */
     rt_ipc_object_init(&(mq->parent));
 
-    /* set messasge pool */
+    /* set message pool */
     mq->msg_pool = msgpool;
 
     /* get correct message size */
     mq->msg_size = RT_ALIGN(msg_size, RT_ALIGN_SIZE);
     mq->max_msgs = pool_size / (mq->msg_size + sizeof(struct rt_mq_message));
 
-    /* init message list */
+    /* initialize message list */
     mq->msg_queue_head = RT_NULL;
     mq->msg_queue_tail = RT_NULL;
 
-    /* init message empty list */
+    /* initialize message empty list */
     mq->msg_queue_free = RT_NULL;
     for (temp = 0; temp < mq->max_msgs; temp ++)
     {
@@ -1822,6 +1985,9 @@ rt_err_t rt_mq_init(rt_mq_t     mq,
 
     /* the initial entry is zero */
     mq->entry = 0;
+
+    /* initialize an additional list of sender suspend thread */
+    rt_list_init(&(mq->suspend_sender_thread));
 
     return RT_EOK;
 }
@@ -1843,6 +2009,8 @@ rt_err_t rt_mq_detach(rt_mq_t mq)
 
     /* resume all suspended thread */
     rt_ipc_list_resume_all(&mq->parent.suspend_thread);
+    /* also resume all message queue private suspended thread */
+    rt_ipc_list_resume_all(&(mq->suspend_sender_thread));
 
     /* detach message queue object */
     rt_object_detach(&(mq->parent.parent));
@@ -1881,10 +2049,10 @@ rt_mq_t rt_mq_create(const char *name,
     /* set parent */
     mq->parent.parent.flag = flag;
 
-    /* init ipc object */
+    /* initialize ipc object */
     rt_ipc_object_init(&(mq->parent));
 
-    /* init message queue */
+    /* initialize message queue */
 
     /* get correct message size */
     mq->msg_size = RT_ALIGN(msg_size, RT_ALIGN_SIZE);
@@ -1894,16 +2062,16 @@ rt_mq_t rt_mq_create(const char *name,
     mq->msg_pool = RT_KERNEL_MALLOC((mq->msg_size + sizeof(struct rt_mq_message)) * mq->max_msgs);
     if (mq->msg_pool == RT_NULL)
     {
-        rt_mq_delete(mq);
+        rt_object_delete(&(mq->parent.parent));
 
         return RT_NULL;
     }
 
-    /* init message list */
+    /* initialize message list */
     mq->msg_queue_head = RT_NULL;
     mq->msg_queue_tail = RT_NULL;
 
-    /* init message empty list */
+    /* initialize message empty list */
     mq->msg_queue_free = RT_NULL;
     for (temp = 0; temp < mq->max_msgs; temp ++)
     {
@@ -1915,6 +2083,9 @@ rt_mq_t rt_mq_create(const char *name,
 
     /* the initial entry is zero */
     mq->entry = 0;
+
+    /* initialize an additional list of sender suspend thread */
+    rt_list_init(&(mq->suspend_sender_thread));
 
     return mq;
 }
@@ -1938,6 +2109,8 @@ rt_err_t rt_mq_delete(rt_mq_t mq)
 
     /* resume all suspended thread */
     rt_ipc_list_resume_all(&(mq->parent.suspend_thread));
+    /* also resume all message queue private suspended thread */
+    rt_ipc_list_resume_all(&(mq->suspend_sender_thread));
 
     /* free message queue pool */
     RT_KERNEL_FREE(mq->msg_pool);
@@ -1948,22 +2121,28 @@ rt_err_t rt_mq_delete(rt_mq_t mq)
     return RT_EOK;
 }
 RTM_EXPORT(rt_mq_delete);
-#endif
+#endif /* RT_USING_HEAP */
 
 /**
- * This function will send a message to message queue object, if there are
- * threads suspended on message queue object, it will be waked up.
+ * This function will send a message to message queue object. If the message queue is full,
+ * current thread will be suspended until timeout.
  *
  * @param mq the message queue object
  * @param buffer the message
  * @param size the size of buffer
+ * @param timeout the waiting time
  *
  * @return the error code
  */
-rt_err_t rt_mq_send(rt_mq_t mq, void *buffer, rt_size_t size)
+rt_err_t rt_mq_send_wait(rt_mq_t     mq,
+                         const void *buffer,
+                         rt_size_t   size,
+                         rt_int32_t  timeout)
 {
     register rt_ubase_t temp;
     struct rt_mq_message *msg;
+    rt_uint32_t tick_delta;
+    struct rt_thread *thread;
 
     /* parameter check */
     RT_ASSERT(mq != RT_NULL);
@@ -1975,6 +2154,11 @@ rt_err_t rt_mq_send(rt_mq_t mq, void *buffer, rt_size_t size)
     if (size > mq->msg_size)
         return -RT_ERROR;
 
+    /* initialize delta tick */
+    tick_delta = 0;
+    /* get current thread */
+    thread = rt_thread_self();
+
     RT_OBJECT_HOOK_CALL(rt_object_put_hook, (&(mq->parent.parent)));
 
     /* disable interrupt */
@@ -1982,14 +2166,78 @@ rt_err_t rt_mq_send(rt_mq_t mq, void *buffer, rt_size_t size)
 
     /* get a free list, there must be an empty item */
     msg = (struct rt_mq_message *)mq->msg_queue_free;
-    /* message queue is full */
-    if (msg == RT_NULL)
+    /* for non-blocking call */
+    if (msg == RT_NULL && timeout == 0)
     {
         /* enable interrupt */
         rt_hw_interrupt_enable(temp);
 
         return -RT_EFULL;
     }
+
+    /* message queue is full */
+    while ((msg = (struct rt_mq_message *)mq->msg_queue_free) == RT_NULL)
+    {
+        /* reset error number in thread */
+        thread->error = RT_EOK;
+
+        /* no waiting, return timeout */
+        if (timeout == 0)
+        {
+            /* enable interrupt */
+            rt_hw_interrupt_enable(temp);
+
+            return -RT_EFULL;
+        }
+
+        RT_DEBUG_IN_THREAD_CONTEXT;
+        /* suspend current thread */
+        rt_ipc_list_suspend(&(mq->suspend_sender_thread),
+                            thread,
+                            mq->parent.parent.flag);
+
+        /* has waiting time, start thread timer */
+        if (timeout > 0)
+        {
+            /* get the start tick of timer */
+            tick_delta = rt_tick_get();
+
+            RT_DEBUG_LOG(RT_DEBUG_IPC, ("mq_send_wait: start timer of thread:%s\n",
+                                        thread->name));
+
+            /* reset the timeout of thread timer and start it */
+            rt_timer_control(&(thread->thread_timer),
+                             RT_TIMER_CTRL_SET_TIME,
+                             &timeout);
+            rt_timer_start(&(thread->thread_timer));
+        }
+
+        /* enable interrupt */
+        rt_hw_interrupt_enable(temp);
+
+        /* re-schedule */
+        rt_schedule();
+
+        /* resume from suspend state */
+        if (thread->error != RT_EOK)
+        {
+            /* return error */
+            return thread->error;
+        }
+
+        /* disable interrupt */
+        temp = rt_hw_interrupt_disable();
+
+        /* if it's not waiting forever and then re-calculate timeout tick */
+        if (timeout > 0)
+        {
+            tick_delta = rt_tick_get() - tick_delta;
+            timeout -= tick_delta;
+            if (timeout < 0)
+                timeout = 0;
+        }
+    }
+
     /* move free list pointer */
     mq->msg_queue_free = msg->next;
 
@@ -2016,8 +2264,16 @@ rt_err_t rt_mq_send(rt_mq_t mq, void *buffer, rt_size_t size)
     if (mq->msg_queue_head == RT_NULL)
         mq->msg_queue_head = msg;
 
-    /* increase message entry */
-    mq->entry ++;
+    if(mq->entry < RT_MQ_ENTRY_MAX)
+    {
+        /* increase message entry */
+        mq->entry ++;
+    }
+    else
+    {
+        rt_hw_interrupt_enable(temp); /* enable interrupt */
+        return -RT_EFULL; /* value overflowed */
+    }
 
     /* resume suspended thread */
     if (!rt_list_isempty(&mq->parent.suspend_thread))
@@ -2037,6 +2293,22 @@ rt_err_t rt_mq_send(rt_mq_t mq, void *buffer, rt_size_t size)
 
     return RT_EOK;
 }
+RTM_EXPORT(rt_mq_send_wait)
+
+/**
+ * This function will send a message to message queue object, if there are
+ * threads suspended on message queue object, it will be waked up.
+ *
+ * @param mq the message queue object
+ * @param buffer the message
+ * @param size the size of buffer
+ *
+ * @return the error code
+ */
+rt_err_t rt_mq_send(rt_mq_t mq, const void *buffer, rt_size_t size)
+{
+    return rt_mq_send_wait(mq, buffer, size, 0);
+}
 RTM_EXPORT(rt_mq_send);
 
 /**
@@ -2050,7 +2322,7 @@ RTM_EXPORT(rt_mq_send);
  *
  * @return the error code
  */
-rt_err_t rt_mq_urgent(rt_mq_t mq, void *buffer, rt_size_t size)
+rt_err_t rt_mq_urgent(rt_mq_t mq, const void *buffer, rt_size_t size)
 {
     register rt_ubase_t temp;
     struct rt_mq_message *msg;
@@ -2100,8 +2372,16 @@ rt_err_t rt_mq_urgent(rt_mq_t mq, void *buffer, rt_size_t size)
     if (mq->msg_queue_tail == RT_NULL)
         mq->msg_queue_tail = msg;
 
-    /* increase message entry */
-    mq->entry ++;
+    if(mq->entry < RT_MQ_ENTRY_MAX)
+    {
+        /* increase message entry */
+        mq->entry ++;
+    }
+    else
+    {
+        rt_hw_interrupt_enable(temp); /* enable interrupt */
+        return -RT_EFULL; /* value overflowed */
+    }
 
     /* resume suspended thread */
     if (!rt_list_isempty(&mq->parent.suspend_thread))
@@ -2244,7 +2524,10 @@ rt_err_t rt_mq_recv(rt_mq_t    mq,
         mq->msg_queue_tail = RT_NULL;
 
     /* decrease message entry */
-    mq->entry --;
+    if(mq->entry > 0)
+    {
+        mq->entry --;
+    }
 
     /* enable interrupt */
     rt_hw_interrupt_enable(temp);
@@ -2257,6 +2540,22 @@ rt_err_t rt_mq_recv(rt_mq_t    mq,
     /* put message to free list */
     msg->next = (struct rt_mq_message *)mq->msg_queue_free;
     mq->msg_queue_free = msg;
+
+    /* resume suspended thread */
+    if (!rt_list_isempty(&(mq->suspend_sender_thread)))
+    {
+        rt_ipc_list_resume(&(mq->suspend_sender_thread));
+
+        /* enable interrupt */
+        rt_hw_interrupt_enable(temp);
+
+        RT_OBJECT_HOOK_CALL(rt_object_take_hook, (&(mq->parent.parent)));
+
+        rt_schedule();
+
+        return RT_EOK;
+    }
+
     /* enable interrupt */
     rt_hw_interrupt_enable(temp);
 
@@ -2292,6 +2591,8 @@ rt_err_t rt_mq_control(rt_mq_t mq, int cmd, void *arg)
 
         /* resume all waiting thread */
         rt_ipc_list_resume_all(&mq->parent.suspend_thread);
+        /* also resume all message queue private suspended thread */
+        rt_ipc_list_resume_all(&(mq->suspend_sender_thread));
 
         /* release all message in the queue */
         while (mq->msg_queue_head != RT_NULL)
@@ -2324,6 +2625,6 @@ rt_err_t rt_mq_control(rt_mq_t mq, int cmd, void *arg)
     return -RT_ERROR;
 }
 RTM_EXPORT(rt_mq_control);
-#endif /* end of RT_USING_MESSAGEQUEUE */
+#endif /* RT_USING_MESSAGEQUEUE */
 
 /**@}*/

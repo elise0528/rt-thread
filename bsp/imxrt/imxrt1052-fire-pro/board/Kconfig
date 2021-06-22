@@ -3,6 +3,8 @@ menu "Hardware Drivers Config"
 config SOC_IMXRT1052CVL5B
     bool 
     select SOC_MIMXRT1050_SERIES
+    select RT_USING_COMPONENTS_INIT
+    select RT_USING_USER_MAIN
     default y
 
 menu "On-chip Peripheral Drivers"
@@ -15,6 +17,17 @@ menu "On-chip Peripheral Drivers"
         bool "Enable GPIO"
         select RT_USING_PIN
         default y
+
+    menuconfig BSP_USING_CAN
+        bool "Enable CAN"
+        select RT_USING_CAN
+        default n
+
+        if BSP_USING_CAN
+            config BSP_USING_CAN1
+                bool "Enable CAN1"
+                default y
+        endif
 
     menuconfig BSP_USING_LPUART
         bool "Enable UART"

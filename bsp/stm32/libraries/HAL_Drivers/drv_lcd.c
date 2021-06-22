@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2018, RT-Thread Development Team
+ * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -108,11 +108,11 @@ void HAL_LTDC_LineEventCallback(LTDC_HandleTypeDef *hltdc)
 
 void LTDC_IRQHandler(void)
 {
-    rt_enter_critical();
+    rt_interrupt_enter();
 
     HAL_LTDC_IRQHandler(&LtdcHandle);
 
-    rt_exit_critical();
+    rt_interrupt_leave();
 }
 
 rt_err_t stm32_lcd_init(struct drv_lcd_device *lcd)
@@ -255,6 +255,11 @@ void turn_on_lcd_backlight(void)
     rt_pin_write(LCD_DISP_GPIO_NUM, PIN_HIGH);
     rt_pin_write(LCD_BL_GPIO_NUM, PIN_HIGH);
 }
+#else
+void turn_on_lcd_backlight(void)
+{
+
+}
 #endif
 
 #ifdef RT_USING_DEVICE_OPS
@@ -333,7 +338,7 @@ int drv_lcd_hw_init(void)
 __exit:
     if (result != RT_EOK)
     {
-        rt_sem_delete(&_lcd.lcd_lock);
+        rt_sem_detach(&_lcd.lcd_lock);
 
         if (_lcd.lcd_info.framebuffer)
         {

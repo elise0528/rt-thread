@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2018, RT-Thread Development Team
+ * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -24,6 +24,12 @@
 #include <af_inet.h>
 
 #include <netdev.h>
+
+#if (LWIP_VERSION < 0x2000000) && NETDEV_IPV6
+#error "The lwIP version is not support IPV6, please disable netdev IPV6 configuration "
+#elif (LWIP_VERSION > 0x2000000) && (NETDEV_IPV6 != LWIP_IPV6)
+#error "IPV6 configuration error, Please check and synchronize netdev and lwip IPV6 configuration."
+#endif
 
 #if LWIP_VERSION < 0x2000000
 #define SELWAIT_T int
@@ -223,7 +229,7 @@ int inet_ioctlsocket(int socket, long cmd, void *arg)
     {
     case F_GETFL:
     case F_SETFL:
-        return lwip_fcntl(socket, cmd, (int) arg); 
+        return lwip_fcntl(socket, cmd, (int) arg);
 
     default:
         return lwip_ioctl(socket, cmd, arg);
@@ -267,6 +273,8 @@ static int inet_poll(struct dfs_fd *file, struct rt_pollreq *req)
         if (sock->errevent)
         {
             mask |= POLLERR;
+            /* clean error event */
+            sock->errevent = 0;
         }
         rt_hw_interrupt_enable(level);
     }
@@ -308,7 +316,11 @@ static const struct sal_netdb_ops lwip_netdb_ops =
 static const struct sal_proto_family lwip_inet_family =
 {
     AF_INET,
+#if LWIP_VERSION > 0x2000000
+    AF_INET6,
+#else
     AF_INET,
+#endif
     &lwip_socket_ops,
     &lwip_netdb_ops,
 };
@@ -317,7 +329,7 @@ static const struct sal_proto_family lwip_inet_family =
 int sal_lwip_netdev_set_pf_info(struct netdev *netdev)
 {
     RT_ASSERT(netdev);
-    
+
     netdev->sal_user_data = (void *) &lwip_inet_family;
     return 0;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2018, RT-Thread Development Team
+ * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -15,7 +15,7 @@
  * 2011-02-23     Bernard      fix variable section end issue of finsh shell
  *                             initialization when use GNU GCC compiler.
  * 2016-11-26     armink       add password authentication
- * 2018-07-02     aozima       add custome prompt support.
+ * 2018-07-02     aozima       add custom prompt support.
  */
 
 #include <rthw.h>
@@ -41,8 +41,38 @@ static char finsh_thread_stack[FINSH_THREAD_STACK_SIZE];
 struct finsh_shell _shell;
 #endif
 
+/* finsh symtab */
+#ifdef FINSH_USING_SYMTAB
+struct finsh_syscall *_syscall_table_begin  = NULL;
+struct finsh_syscall *_syscall_table_end    = NULL;
+struct finsh_sysvar *_sysvar_table_begin    = NULL;
+struct finsh_sysvar *_sysvar_table_end      = NULL;
+#endif
+
 struct finsh_shell *shell;
 static char *finsh_prompt_custom = RT_NULL;
+
+#if defined(_MSC_VER) || (defined(__GNUC__) && defined(__x86_64__))
+struct finsh_syscall* finsh_syscall_next(struct finsh_syscall* call)
+{
+    unsigned int *ptr;
+    ptr = (unsigned int*) (call + 1);
+    while ((*ptr == 0) && ((unsigned int*)ptr < (unsigned int*) _syscall_table_end))
+        ptr ++;
+
+    return (struct finsh_syscall*)ptr;
+}
+
+struct finsh_sysvar* finsh_sysvar_next(struct finsh_sysvar* call)
+{
+    unsigned int *ptr;
+    ptr = (unsigned int*) (call + 1);
+    while ((*ptr == 0) && ((unsigned int*)ptr < (unsigned int*) _sysvar_table_end))
+        ptr ++;
+
+    return (struct finsh_sysvar*)ptr;
+}
+#endif /* defined(_MSC_VER) || (defined(__GNUC__) && defined(__x86_64__)) */
 
 #ifdef RT_USING_HEAP
 int finsh_set_prompt(const char * prompt)
@@ -67,11 +97,11 @@ int finsh_set_prompt(const char * prompt)
 }
 #endif /* RT_USING_HEAP */
 
-#if defined(RT_USING_DFS)
+#ifdef RT_USING_DFS
 #include <dfs_posix.h>
 #endif /* RT_USING_DFS */
 
-const char *finsh_get_prompt()
+const char *finsh_get_prompt(void)
 {
 #define _MSH_PROMPT "msh "
 #define _PROMPT     "finsh "
@@ -136,6 +166,7 @@ void finsh_set_prompt_mode(rt_uint32_t prompt_mode)
 
 static int finsh_getchar(void)
 {
+#ifdef RT_USING_DEVICE
 #ifdef RT_USING_POSIX
     return getchar();
 #else
@@ -147,9 +178,13 @@ static int finsh_getchar(void)
 
     return (int)ch;
 #endif
+#else
+    extern char rt_hw_console_getchar(void);
+    return rt_hw_console_getchar();
+#endif
 }
 
-#ifndef RT_USING_POSIX
+#if !defined(RT_USING_POSIX) && defined(RT_USING_DEVICE)
 static rt_err_t finsh_rx_ind(rt_device_t dev, rt_size_t size)
 {
     RT_ASSERT(shell != RT_NULL);
@@ -477,7 +512,7 @@ void finsh_thread_entry(void *parameter)
     finsh_init(&shell->parser);
 #endif
 
-#ifndef RT_USING_POSIX
+#if !defined(RT_USING_POSIX) && defined(RT_USING_DEVICE)
     /* set console device as shell device */
     if (shell->device == RT_NULL)
     {
@@ -796,7 +831,7 @@ int finsh_system_init(void)
                                __section_end("FSymTab"));
     finsh_system_var_init(__section_begin("VSymTab"),
                           __section_end("VSymTab"));
-#elif defined (__GNUC__) || defined(__TI_COMPILER_VERSION__)
+#elif defined (__GNUC__) || defined(__TI_COMPILER_VERSION__) || defined(__TASKING__)
     /* GNU GCC Compiler and TI CCS */
     extern const int __fsymtab_start;
     extern const int __fsymtab_end;
@@ -809,7 +844,7 @@ int finsh_system_init(void)
     finsh_system_var_init(&__vsymtab_start, &__vsymtab_end);
 #elif defined(_MSC_VER)
     unsigned int *ptr_begin, *ptr_end;
-		
+
     if(shell)
     {
         rt_kprintf("finsh shell already init.\n");

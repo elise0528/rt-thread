@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2018, RT-Thread Development Team
+ * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -225,7 +225,7 @@ static nfs_fh3 *get_dir_handle(nfs_filesystem *nfs, const char *name)
         copy_handle(handle, &nfs->current_handle);
     }
 
-    while ((file = strtok_r(NULL, "/", &path)) != NULL && path[0] != 0)
+    while ((file = strtok_r(NULL, "/", &path)) != NULL && path && path[0] != 0)
     {
         LOOKUP3args args;
         LOOKUP3res res;
@@ -747,7 +747,7 @@ int nfs_open(struct dfs_fd *file)
     RT_ASSERT(file->data != NULL);
     struct dfs_filesystem *dfs_nfs  = ((struct dfs_filesystem *)(file->data));
     nfs = (struct nfs_filesystem *)(dfs_nfs->data);
-
+    RT_ASSERT(nfs != NULL);
 
     if (file->flags & O_DIRECTORY)
     {
@@ -1106,11 +1106,20 @@ int nfs_getdents(struct dfs_fd *file, struct dirent *dirp, uint32_t count)
         if (name == NULL)
             break;
 
+        if (rt_strcmp(name, ".") == 0)
+        {
+            continue;
+        }
+        else if (rt_strcmp(name, "..") == 0)
+        {
+            continue;
+        }
+
         d->d_type = DT_REG;
 
         d->d_namlen = rt_strlen(name);
         d->d_reclen = (rt_uint16_t)sizeof(struct dirent);
-        rt_strncpy(d->d_name, name, rt_strlen(name) + 1);
+        rt_strncpy(d->d_name, name, DFS_PATH_MAX);
 
         index ++;
         if (index * sizeof(struct dirent) >= count)

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2018, RT-Thread Development Team
+ * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -45,16 +45,15 @@ public:
 
     static void sleep(int32_t millisec);
 
-    void wait(int32_t millisec);
-    void join(int32_t millisec = -1);
+    rt_err_t wait(int32_t millisec);
+    rt_err_t join(int32_t millisec = -1);
 
 protected:
-    virtual void run();
+    virtual void run(void *parameter);
 
 private:
     static void func(Thread *pThis);
 
-private:
     rt_thread_t _thread;
 
     thread_func_t _entry;

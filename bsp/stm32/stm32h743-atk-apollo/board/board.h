@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2018, RT-Thread Development Team
+ * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -18,6 +18,10 @@
 
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+#if !defined  (LSI_VALUE)
+  #define LSI_VALUE  ((uint32_t)32000)
 #endif
 
 #define STM32_FLASH_START_ADRESS     ((uint32_t)0x08000000)

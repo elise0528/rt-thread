@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2018, RT-Thread Development Team
+ * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -11,6 +11,7 @@
  * 2012-12-23   aozima      stack addr align to 8byte.
  * 2012-12-29   Bernard     Add exception hook.
  * 2013-07-09   aozima      enhancement hard fault exception handler.
+ * 2019-07-03   yangjie     add __rt_ffs() for armclang.
  */
 
 #include <rtthread.h>
@@ -343,7 +344,7 @@ void rt_hw_hard_fault_exception(struct exception_info * exception_info)
 /**
  * shutdown CPU
  */
-void rt_hw_cpu_shutdown(void)
+RT_WEAK void rt_hw_cpu_shutdown(void)
 {
     rt_kprintf("shutdown...\n");
 
@@ -381,6 +382,24 @@ __asm int __rt_ffs(int value)
 
 exit
     BX      lr
+}
+#elif defined(__CLANG_ARM)
+int __rt_ffs(int value)
+{
+    __asm volatile(
+        "CMP     r0, #0x00            \n"
+        "BEQ     1f                   \n"
+
+        "RBIT    r0, r0               \n"
+        "CLZ     r0, r0               \n"
+        "ADDS    r0, r0, #0x01        \n"
+
+        "1:                           \n"
+
+        : "=r"(value)
+        : "r"(value)
+    );
+    return value;
 }
 #elif defined(__IAR_SYSTEMS_ICC__)
 int __rt_ffs(int value)

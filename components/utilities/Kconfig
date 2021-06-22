@@ -4,6 +4,17 @@ config RT_USING_RYM
     bool "Enable Ymodem"
     default n
 
+    if RT_USING_RYM
+        config YMODEM_USING_CRC_TABLE
+        bool "Enable CRC Table in Ymodem"
+        default n
+
+        config YMODEM_USING_FILE_TRANSFER
+        bool "Enable file transfer feature"
+        depends on RT_USING_DFS
+        default y
+    endif
+
 config RT_USING_ULOG
     bool "Enable ulog"
     default n
@@ -146,7 +157,6 @@ config RT_USING_ULOG
             config ULOG_TIME_USING_TIMESTAMP
                 bool "Enable timestamp format for time."
                 default n
-                select RT_USING_LIBC
                 depends on ULOG_OUTPUT_TIME
 
             config ULOG_OUTPUT_LEVEL
@@ -194,5 +204,7 @@ config RT_USING_UTEST
             int "The utest thread priority"
             default 20
     endif
+
+source "$RTT_DIR/components/utilities/rt-link/Kconfig"
 
 endmenu
